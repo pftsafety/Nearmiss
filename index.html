@@ -764,6 +764,17 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     margin-bottom:18px; display:block; background:var(--bg);
     cursor:zoom-in;
   }
+  .dr-photo-grid{
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(96px, 1fr));
+    gap:8px; margin-bottom:18px;
+  }
+  .dr-photo-thumb{
+    width:100%; aspect-ratio:1/1; object-fit:cover;
+    border-radius:8px; border:1px solid var(--line);
+    background:var(--bg); cursor:zoom-in;
+    transition:border-color .12s ease, transform .1s ease;
+  }
+  .dr-photo-thumb:hover{ border-color:var(--navy); transform:scale(1.03); }
   .dr-photo-fallback{
     padding:22px; text-align:center; color:var(--ink-soft); font-size:13px;
     border:1px dashed var(--line); border-radius:8px; margin-bottom:18px;
@@ -1393,13 +1404,20 @@ function renderRecordList() {
   });
 }
 
-// Pulls a Google Drive file ID out of either an "open?id=" link or a "/file/d/ID/view" link.
-function extractDriveFileId(url) {
-  if (!url) return null;
-  let m = String(url).match(/[?&]id=([a-zA-Z0-9_-]+)/);
-  if (m) return m[1];
-  m = String(url).match(/\/d\/([a-zA-Z0-9_-]+)/);
-  return m ? m[1] : null;
+// Pulls every Google Drive file ID out of a cell that may contain one or several links
+// (Google Forms joins multiple file uploads into a single cell separated by commas/newlines).
+function extractAllDriveFileIds(text) {
+  if (!text) return [];
+  const ids = [];
+  const seen = new Set();
+  const patterns = [/[?&]id=([a-zA-Z0-9_-]{10,})/g, /\/d\/([a-zA-Z0-9_-]{10,})/g];
+  patterns.forEach(re => {
+    let m;
+    while ((m = re.exec(String(text)))) {
+      if (!seen.has(m[1])) { seen.add(m[1]); ids.push(m[1]); }
+    }
+  });
+  return ids;
 }
 
 function driveField(label, value) {
@@ -1412,18 +1430,31 @@ function driveField(label, value) {
 
 function openDrawer(row) {
   const photoUrl = COLS.photo ? row[COLS.photo] : '';
-  const fileId = extractDriveFileId(photoUrl);
+  const fileIds = extractAllDriveFileIds(photoUrl);
 
   let photoHtml;
-  if (fileId) {
-    // Try the higher-res googleusercontent host first; fall back to Drive's thumbnail endpoint,
-    // then to a plain "open in Drive" link if the file isn't shared for inline viewing.
-    const primarySrc = `https://lh3.googleusercontent.com/d/${fileId}=w1000`;
-    const fallbackSrc = `https://drive.google.com/thumbnail?id=${fileId}&sz=w1000`;
-    photoHtml = `<img class="dr-photo" src="${primarySrc}" alt="Observation photo" loading="lazy"
+  if (fileIds.length === 1) {
+    // Single photo — same as before, shown large.
+    const id = fileIds[0];
+    const primarySrc = `https://lh3.googleusercontent.com/d/${id}=w1000`;
+    const fallbackSrc = `https://drive.google.com/thumbnail?id=${id}&sz=w1000`;
+    photoHtml = `<img class="dr-photo" data-file-id="${id}" src="${primarySrc}" alt="Observation photo" loading="lazy"
       onerror="if(!this.dataset.retried){this.dataset.retried='1';this.src='${fallbackSrc}';}else{this.replaceWith(Object.assign(document.createElement('div'),{className:'dr-photo-fallback',innerHTML:'Photo could not be loaded inline. <a class=\\'photo-link\\' href=\\'${escapeAttr(photoUrl)}\\' target=\\'_blank\\' rel=\\'noopener\\'>Open in Drive</a>'}));}">`;
+  } else if (fileIds.length > 1) {
+    // Multiple photos — show every one as a thumbnail; click any to view it full-size.
+    const thumbs = fileIds.map((id, i) => {
+      const thumbSrc = `https://lh3.googleusercontent.com/d/${id}=w400`;
+      const thumbFallback = `https://drive.google.com/thumbnail?id=${id}&sz=w400`;
+      return `<img class="dr-photo-thumb" data-file-id="${id}" src="${thumbSrc}" alt="Observation photo ${i + 1}" loading="lazy"
+        onerror="if(!this.dataset.retried){this.dataset.retried='1';this.src='${thumbFallback}';}else{this.style.display='none';}">`;
+    }).join('');
+    photoHtml = `<div class="dr-photo-grid">${thumbs}</div>`;
   } else if (photoUrl) {
-    photoHtml = `<div class="dr-photo-fallback">Photo link couldn't be parsed for inline preview.<br><a class="photo-link" href="${escapeAttr(photoUrl)}" target="_blank" rel="noopener">Open in Drive</a></div>`;
+    const rawLinks = String(photoUrl).split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+    const links = (rawLinks.length ? rawLinks : [photoUrl])
+      .map((link, i) => `<a class="photo-link" href="${escapeAttr(link)}" target="_blank" rel="noopener">Open photo${rawLinks.length > 1 ? ' ' + (i + 1) : ''}</a>`)
+      .join(' &nbsp;·&nbsp; ');
+    photoHtml = `<div class="dr-photo-fallback">Photo link${rawLinks.length > 1 ? 's' : ''} couldn't be parsed for inline preview.<br>${links}</div>`;
   } else {
     photoHtml = `<div class="dr-photo-fallback">No photo attached.</div>`;
   }
@@ -1444,10 +1475,10 @@ function openDrawer(row) {
 
   renderDrawerStatusAction(row);
 
-  const photoImg = els.drawerBody.querySelector('.dr-photo');
-  if (photoImg && fileId) {
-    photoImg.addEventListener('click', () => openLightbox(fileId));
-  }
+  els.drawerBody.querySelectorAll('.dr-photo, .dr-photo-thumb').forEach(img => {
+    const id = img.dataset.fileId;
+    if (id) img.addEventListener('click', () => openLightbox(id));
+  });
 
   els.drawerOverlay.classList.add('open');
   els.drawer.classList.add('open');
