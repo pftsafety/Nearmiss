@@ -746,8 +746,13 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     gap:12px; padding:18px 20px; border-bottom:1px solid var(--line);
     flex-shrink:0;
   }
+  .drawer-heading{ display:flex; flex-direction:column; gap:2px; min-width:0; }
   .drawer-header h3{
     font-family:'Space Grotesk',sans-serif; font-size:16px; margin:0;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .drawer-subtitle{
+    font-size:12px; color:var(--ink-soft);
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
   .drawer-close{
@@ -993,7 +998,10 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
 <div class="drawer-overlay" id="drawerOverlay"></div>
 <aside class="drawer" id="drawer">
   <div class="drawer-header">
-    <h3 id="drawerTitle">Observation</h3>
+    <div class="drawer-heading">
+      <h3 id="drawerTitle">Observation</h3>
+      <div class="drawer-subtitle" id="drawerSubtitle"></div>
+    </div>
     <button class="drawer-close" id="drawerClose" aria-label="Close">✕</button>
   </div>
   <div class="drawer-body" id="drawerBody"></div>
@@ -1049,6 +1057,7 @@ const els = {
   drawerOverlay: document.getElementById('drawerOverlay'),
   drawer: document.getElementById('drawer'),
   drawerTitle: document.getElementById('drawerTitle'),
+  drawerSubtitle: document.getElementById('drawerSubtitle'),
   drawerBody: document.getElementById('drawerBody'),
   drawerClose: document.getElementById('drawerClose'),
   lightbox: document.getElementById('lightbox'),
@@ -1375,15 +1384,28 @@ function showChartsUnavailable() {
   });
 }
 
+// The sheet's actual row number (header is row 1), giving a stable serial that doesn't
+// shift when the list is filtered or sorted.
+function nmrNumber(row) {
+  return row._row - 1;
+}
+
+function formatDateOnly(raw) {
+  const d = parseRowDate(raw);
+  if (d) return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  return raw || '';
+}
+
 // Compact, collapsed summary rows. Clicking one opens the full record in the side drawer.
 function renderRecordList() {
   els.recordList.innerHTML = FILTERED.map(row => {
     const closed = isClosed(row);
-    const meta = [row[COLS.department], row[COLS.timestamp]].filter(Boolean).join(' · ');
+    const dateStr = formatDateOnly(row[COLS.timestamp]);
+    const meta = [row[COLS.department], row[COLS.location]].filter(Boolean).join(' · ');
     return `
       <div class="record-row" data-row="${row._row}">
         <div class="rr-main">
-          <div class="rr-location">${escapeHtml(row[COLS.location] || 'Unspecified location')}</div>
+          <div class="rr-location">NMR #${nmrNumber(row)}${dateStr ? ' · ' + escapeHtml(dateStr) : ''}</div>
           <div class="rr-meta">${escapeHtml(meta)}</div>
         </div>
         <div class="rr-right">
@@ -1459,7 +1481,8 @@ function openDrawer(row) {
     photoHtml = `<div class="dr-photo-fallback">No photo attached.</div>`;
   }
 
-  els.drawerTitle.textContent = row[COLS.location] || 'Observation';
+  els.drawerTitle.textContent = `NMR #${nmrNumber(row)}`;
+  els.drawerSubtitle.textContent = formatDateOnly(row[COLS.timestamp]);
   els.drawerBody.innerHTML = `
     ${photoHtml}
     ${driveField('Timestamp', row[COLS.timestamp])}
