@@ -659,6 +659,48 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
   .date-range-sep{ font-size:12px; color:var(--ink-soft); }
   .result-count{ font-size:12px; color:var(--ink-soft); margin-left:auto; }
 
+  /* ---------- department multi-select ---------- */
+  .multiselect{ position:relative; }
+  .multiselect-btn{
+    font-family:'Inter',sans-serif; font-size:13px; font-weight:500;
+    padding:9px 12px; border-radius:7px; border:1px solid var(--line);
+    background:#fff; color:var(--ink);
+    display:flex; align-items:center; gap:8px; white-space:nowrap;
+  }
+  .multiselect-btn:hover{ border-color:var(--navy); }
+  .multiselect-btn.active{ border-color:var(--navy); background:var(--navy-soft); }
+  .multiselect-caret{ font-size:10px; color:var(--ink-soft); }
+
+  .multiselect-panel{
+    position:absolute; top:calc(100% + 6px); left:0; z-index:20;
+    width:260px; max-width:80vw;
+    background:#fff; border:1px solid var(--line); border-radius:9px;
+    box-shadow:0 8px 24px rgba(22,27,34,0.14);
+    display:none; flex-direction:column;
+  }
+  .multiselect-panel.open{ display:flex; }
+
+  .multiselect-actions{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:8px 10px; border-bottom:1px solid var(--line);
+  }
+  .multiselect-actions button{
+    background:none; border:none; font-size:12px; font-weight:700;
+    color:var(--navy); padding:4px 6px;
+  }
+  .multiselect-actions button:hover{ text-decoration:underline; }
+
+  .multiselect-options{ max-height:240px; overflow-y:auto; padding:6px 0; }
+  .multiselect-option{
+    display:flex; align-items:center; gap:9px;
+    padding:7px 12px; font-size:13px; color:var(--ink); cursor:pointer;
+  }
+  .multiselect-option:hover{ background:var(--bg); }
+  .multiselect-option input{ accent-color:var(--navy); width:15px; height:15px; flex-shrink:0; }
+  .multiselect-option span{
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+
   .records-head{
     display:flex; align-items:center; justify-content:space-between;
     gap:10px; margin-bottom:12px;
@@ -883,6 +925,9 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     .panel{ padding:14px 14px 6px; }
     .filters{ flex-direction:column; align-items:stretch; }
     .filters input[type="text"], .filters select{ width:100%; }
+    .multiselect{ width:100%; }
+    .multiselect-btn{ width:100%; justify-content:space-between; }
+    .multiselect-panel{ width:100%; max-width:none; }
     .date-range{ width:100%; }
     .date-range input[type="date"]{ flex:1; min-width:0; }
     .result-count{ margin-left:0; text-align:right; }
@@ -1003,7 +1048,19 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
 
       <div class="filters">
         <input type="text" id="searchInput" placeholder="Search name, location, description…">
-        <select id="deptFilter"><option value="">All Departments</option></select>
+        <div class="multiselect" id="deptMultiselect">
+          <button type="button" class="multiselect-btn" id="deptMultiselectBtn" aria-haspopup="true" aria-expanded="false">
+            <span id="deptMultiselectLabel">All Departments</span>
+            <span class="multiselect-caret">▾</span>
+          </button>
+          <div class="multiselect-panel" id="deptMultiselectPanel">
+            <div class="multiselect-actions">
+              <button type="button" id="deptSelectAllBtn">Select all</button>
+              <button type="button" id="deptClearAllBtn">Clear</button>
+            </div>
+            <div class="multiselect-options" id="deptOptionsList"></div>
+          </div>
+        </div>
         <select id="typeFilter"><option value="">All Types</option></select>
         <select id="statusFilter"><option value="">All Status</option></select>
         <span class="date-range">
@@ -1043,7 +1100,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
   <img class="lightbox-img" id="lightboxImg" alt="Observation photo, full size">
 </div>
 
-<footer>Near Miss Dashboard · data served live from Google Sheets via Apps Script</footer>
+<footer>Near Miss Dashboard</footer>
 
 <script>
 /* =========================================================================
@@ -1059,6 +1116,7 @@ let COLS = {};
 let FILTERED = [];
 let trendState = { view: 'yearly', year: null }; // drives the Yearly/Monthly trend drill-down
 let quickFilter = null; // set to 'open' when the Open stat card is clicked
+let selectedDepts = new Set(); // departments checked in the multi-select filter (empty = all)
 let CHARTS = {};
 
 const els = {
@@ -1073,7 +1131,13 @@ const els = {
   exportExcelBtn: document.getElementById('exportExcelBtn'),
   exportPdfBtn: document.getElementById('exportPdfBtn'),
   search: document.getElementById('searchInput'),
-  deptFilter: document.getElementById('deptFilter'),
+  deptMultiselect: document.getElementById('deptMultiselect'),
+  deptMultiselectBtn: document.getElementById('deptMultiselectBtn'),
+  deptMultiselectLabel: document.getElementById('deptMultiselectLabel'),
+  deptMultiselectPanel: document.getElementById('deptMultiselectPanel'),
+  deptOptionsList: document.getElementById('deptOptionsList'),
+  deptSelectAllBtn: document.getElementById('deptSelectAllBtn'),
+  deptClearAllBtn: document.getElementById('deptClearAllBtn'),
   typeFilter: document.getElementById('typeFilter'),
   statusFilter: document.getElementById('statusFilter'),
   dateFrom: document.getElementById('dateFrom'),
@@ -1169,9 +1233,48 @@ function populateFilterOptions() {
       select.appendChild(opt);
     });
   };
-  if (COLS.department) fill(els.deptFilter, uniqueValues(COLS.department));
+
+  if (COLS.department) {
+    const deptValues = uniqueValues(COLS.department);
+    // Drop any previously-selected department that no longer exists in the data (e.g. after a refresh).
+    selectedDepts = new Set([...selectedDepts].filter(v => deptValues.includes(v)));
+    renderDeptOptions(deptValues);
+    updateDeptButtonLabel();
+  }
   if (COLS.type) fill(els.typeFilter, uniqueValues(COLS.type));
   if (COLS.status) fill(els.statusFilter, uniqueValues(COLS.status));
+}
+
+function renderDeptOptions(values) {
+  els.deptOptionsList.innerHTML = values.map(v => `
+    <label class="multiselect-option">
+      <input type="checkbox" value="${escapeAttr(v)}" ${selectedDepts.has(v) ? 'checked' : ''}>
+      <span>${escapeHtml(v)}</span>
+    </label>`).join('');
+
+  els.deptOptionsList.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      if (cb.checked) selectedDepts.add(cb.value);
+      else selectedDepts.delete(cb.value);
+      updateDeptButtonLabel();
+      applyFilters();
+    });
+  });
+}
+
+function updateDeptButtonLabel() {
+  const n = selectedDepts.size;
+  els.deptMultiselectLabel.textContent =
+    n === 0 ? 'All Departments' :
+    n === 1 ? [...selectedDepts][0] :
+    `${n} Departments selected`;
+  els.deptMultiselectBtn.classList.toggle('active', n > 0);
+}
+
+function toggleDeptPanel(forceOpen) {
+  const willOpen = forceOpen !== undefined ? forceOpen : !els.deptMultiselectPanel.classList.contains('open');
+  els.deptMultiselectPanel.classList.toggle('open', willOpen);
+  els.deptMultiselectBtn.setAttribute('aria-expanded', String(willOpen));
 }
 
 function isClosed(row) {
@@ -1181,7 +1284,6 @@ function isClosed(row) {
 
 function applyFilters() {
   const q = els.search.value.trim().toLowerCase();
-  const dept = els.deptFilter.value;
   const type = els.typeFilter.value;
   const status = els.statusFilter.value;
 
@@ -1193,7 +1295,7 @@ function applyFilters() {
   els.clearDatesBtn.style.display = (fromVal || toVal) ? 'inline-block' : 'none';
 
   FILTERED = RAW_ROWS.filter(r => {
-    if (dept && r[COLS.department] !== dept) return false;
+    if (selectedDepts.size > 0 && !selectedDepts.has(r[COLS.department])) return false;
     if (type && r[COLS.type] !== type) return false;
     if (status && r[COLS.status] !== status) return false;
     if (quickFilter === 'open' && isClosed(r)) return false;
@@ -1715,7 +1817,27 @@ els.exportCsvBtn.addEventListener('click', exportCSV);
 els.exportExcelBtn.addEventListener('click', exportExcel);
 els.exportPdfBtn.addEventListener('click', exportPDF);
 els.search.addEventListener('input', applyFilters);
-els.deptFilter.addEventListener('change', applyFilters);
+els.deptMultiselectBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  toggleDeptPanel();
+});
+els.deptSelectAllBtn.addEventListener('click', () => {
+  els.deptOptionsList.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+    cb.checked = true;
+    selectedDepts.add(cb.value);
+  });
+  updateDeptButtonLabel();
+  applyFilters();
+});
+els.deptClearAllBtn.addEventListener('click', () => {
+  selectedDepts.clear();
+  els.deptOptionsList.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+  updateDeptButtonLabel();
+  applyFilters();
+});
+document.addEventListener('click', (e) => {
+  if (!els.deptMultiselect.contains(e.target)) toggleDeptPanel(false);
+});
 els.typeFilter.addEventListener('change', applyFilters);
 els.statusFilter.addEventListener('change', applyFilters);
 els.dateFrom.addEventListener('change', applyFilters);
@@ -1751,6 +1873,7 @@ els.quickFilterClearBtn.addEventListener('click', () => {
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (els.lightbox.classList.contains('open')) closeLightbox();
+  else if (els.deptMultiselectPanel.classList.contains('open')) toggleDeptPanel(false);
   else closeDrawer();
 });
 
