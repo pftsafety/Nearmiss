@@ -796,7 +796,6 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
   .dr-chip.condition{ background:var(--crimson-soft); color:var(--crimson); }
   .dr-chip.act{ background:var(--amber-soft); color:var(--amber-deep); }
   .dr-chip.other{ background:var(--navy-soft); color:var(--navy); }
-  .dr-chip.dept{ background:var(--emerald-soft); color:var(--emerald); }
 
   /* compact 2-column grid for short facts */
   .dr-meta-grid{
@@ -1541,17 +1540,16 @@ function openDrawer(row) {
   renderDrawerStatusBadge(row);
 
   const typeVal = row[COLS.type];
-  const deptVal = row[COLS.department];
 
   els.drawerBody.innerHTML = `
     ${photoHtml}
     <div class="dr-chips">
       ${typeVal ? `<span class="dr-chip ${typeChipClass(typeVal)}">${escapeHtml(typeVal)}</span>` : ''}
-      ${deptVal ? `<span class="dr-chip dept">${escapeHtml(deptVal)}</span>` : ''}
     </div>
     <div class="dr-meta-grid">
       ${metaItem('Reported By', row[COLS.name])}
       ${metaItem('Card No', row[COLS.cardNo])}
+      ${metaItem('Department', row[COLS.department])}
       ${metaItem('Location', row[COLS.location])}
       ${metaItem('Reported On', row[COLS.timestamp])}
     </div>
